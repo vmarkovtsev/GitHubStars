@@ -8,6 +8,7 @@ from github import Github as GitHub, RateLimitExceededException
 
 class GitHubStars(object):
     QUERY_LIMIT = 1000
+    THRESHOLD = 1 << 20
 
     def __init__(self, login_or_token, password=None, **kwargs):
         self._start_index = kwargs.pop("start", 50)
@@ -38,9 +39,13 @@ class GitHubStars(object):
                 print("Hit rate limit, sleeping 60 seconds...")
                 sleep(60)
                 continue
-            if length == 0:
+            except Exception as e:
+                print("type(%s): %s" % (type(e), e))
+                sleep(0.1)
+                continue
+            if m >= self.THRESHOLD and length == 0:
                 break
-            if length < self.QUERY_LIMIT:
+            if m < self.THRESHOLD and length < self.QUERY_LIMIT:
                 offset += m
                 m *= 2
             else:
@@ -63,47 +68,85 @@ class GitHubStars(object):
                 plan.append((int(s), int(f)))
         return plan
 
+    def write_plan(self, plan, file_name):
+        with open(file_name, "w") as fout:
+            for p in plan:
+                fout.write("%d..%d\n" % p)
+
     def fetch(self, plan):
         repos = []
-        for p in plan:
-            print("f %d..%d" % p)
-            query = self._api.search_repositories(
-                "stars:%d..%d" % p, sort="updated", order="asc")
-            repos.extend(query)
+        for i, p in enumerate(plan):
+            print("f %d..%d\t%d / %d" % (p + (i + 1, len(plan))))
+            success = False
+            while not success:
+                try:
+                    query = self._api.search_repositories(
+                        "stars:%d..%d" % p, sort="updated", order="asc")
+                    repos.extend(query)
+                    success = True
+                except RateLimitExceededException:
+                    print("Hit rate limit, sleeping 60 seconds...")
+                    sleep(60)
+                    continue
+                except Exception as e:
+                    print("type(%s): %s" % (type(e), e))
+                    sleep(0.1)
+                    continue
             if query.totalCount > self.QUERY_LIMIT:
-                query = self._api.search_repositories(
-                    "stars:%d..%d" % p, sort="updated", order="desc")
-                assert query.totalCount <= self.QUERY_LIMIT * 2
-                for i, r in enumerate(query):
-                    if i > query.totalCount - 1000:
-                        break
-                    repos.append(r)
+                success = False
+                while not success:
+                    try:
+                        query = self._api.search_repositories(
+                            "stars:%d..%d" % p, sort="updated", order="desc")
+                        assert query.totalCount <= self.QUERY_LIMIT * 2
+                        for i, r in enumerate(query):
+                            if i > query.totalCount - 1000:
+                                break
+                            repos.append(r)
+                        success = True
+                    except RateLimitExceededException:
+                        print("Hit rate limit, sleeping 60 seconds...")
+                        sleep(60)
+                        continue
+                    except Exception as e:
+                        print("type(%s): %s" % (type(e), e))
+                        sleep(0.1)
+                        continue
         return repos
 
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("-i", "--token", "Github API token", required=True)
-    parser.add_argument("-p", "--plan", "Path to file with the fetch plan")
-    parser.add_argument("--save-plan", "Path to file where to write the "
-                                       "resulting fetch plan")
-    parser.add_argument("-o", "--output", "Path to the output JSON")
+    parser.add_argument("-i", "--token", help="Github API token",
+                        required=True)
+    parser.add_argument("-p", "--plan",
+                        help="Path to file with the fetch plan")
+    parser.add_argument("--save-plan",
+                        help="Path to file where to write the resulting fetch "
+                             "plan")
+    parser.add_argument("-s", "--start", help="Min stars", default=50, type=int)
+    parser.add_argument("-o", "--output", help="Path to the output JSON",
+                        required=True)
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
-    stars = GitHubStars(args.token)
+    stars = GitHubStars(args.token, start=args.start)
     if args.plan:
         plan = stars.read_plan(args.plan)
-    stars.start_index = plan[-1][1] + 1
+        stars.start_index = plan[-1][1] + 1
+    else:
+        plan = []
     plan += stars.make_plan()
-    print("----plan----")
+    print("----plan (≈%d fetches)----" % (len(plan) * 20))
     print(plan)
+    if args.save_plan:
+        stars.write_plan(plan, args.save_plan)
     repos = stars.fetch(plan)
-    with open("repos.pickle", "wb") as fout:
+    with open(args.output, "wb") as fout:
         pickle.dump(repos, fout, protocol=-1)
-    print("The result was written to repos.pickle")
+    print("The result was written to %s" % args.output)
 
 
 if __name__ == "__main__":
