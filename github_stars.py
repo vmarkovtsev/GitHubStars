@@ -1,4 +1,5 @@
 import argparse
+import json
 import pickle
 import sys
 from time import sleep
@@ -158,23 +159,93 @@ class GitHubStars(object):
         return repos
 
 
+def repo_to_dict(r):
+    return {
+        "archive_url": r.archive_url,
+        "assignees_url": r.assignees_url,
+        "blobs_url": r.blobs_url,
+        "branches_url": r.branches_url,
+        "clone_url": r.clone_url,
+        "collaborators_url": r.collaborators_url,
+        "comments_url": r.comments_url,
+        "commits_url": r.commits_url,
+        "compare_url": r.compare_url,
+        "contents_url": r.contents_url,
+        "contributors_url": r.contributors_url,
+        "created_at": str(r.created_at),
+        "default_branch": r.default_branch,
+        "description": r.description,
+        "downloads_url": r.downloads_url,
+        "events_url": r.events_url,
+        "fork": r.fork,
+        "forks": r.forks,
+        "forks_count": r.forks_count,
+        "forks_url": r.forks_url,
+        "full_name": r.full_name,
+        "git_commits_url": r.git_commits_url,
+        "git_refs_url": r.git_refs_url,
+        "git_tags_url": r.git_tags_url,
+        "git_url": r.git_url,
+        "has_downloads": r.has_downloads,
+        "has_issues": r.has_issues,
+        "has_wiki": r.has_wiki,
+        "homepage": r.homepage,
+        "hooks_url": r.hooks_url,
+        "html_url": r.html_url,
+        "id": r.id,
+        "issue_comment_url": r.issue_comment_url,
+        "issue_events_url": r.issue_events_url,
+        "issues_url": r.issues_url,
+        "keys_url": r.keys_url,
+        "labels_url": r.labels_url,
+        "language": r.language,
+        "languages_url": r.languages_url,
+        "merges_url": r.merges_url,
+        "milestones_url": r.milestones_url,
+        "mirror_url": r.mirror_url,
+        "name": r.name,
+        "notifications_url": r.notifications_url,
+        "open_issues": r.open_issues,
+        "open_issues_count": r.open_issues_count,
+        "owner": r.owner.login,
+        "pulls_url": r.pulls_url,
+        "pushed_at": str(r.pushed_at),
+        "size": r.size,
+        "ssh_url": r.ssh_url,
+        "stargazers_count": r.stargazers_count,
+        "stargazers_url": r.stargazers_url,
+        "statuses_url": r.statuses_url,
+        "subscribers_url": r.subscribers_url,
+        "subscription_url": r.subscription_url,
+        "svn_url": r.svn_url,
+        "tags_url": r.tags_url,
+        "teams_url": r.teams_url,
+        "trees_url": r.trees_url,
+        "updated_at": str(r.updated_at),
+        "url": r.url,
+        "watchers": r.watchers,
+        "watchers_count": r.watchers_count,
+    }
+
+
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("-i", "--token", help="Github API token",
                         required=True)
     parser.add_argument("-p", "--plan",
-                        help="Path to file with the fetch plan")
+                        help="path to file with the fetch plan")
     parser.add_argument("--save-plan",
-                        help="Path to file where to write the resulting fetch "
+                        help="path to file where to write the resulting fetch "
                              "plan")
-    parser.add_argument("-s", "--start", help="Min stars", default=50, type=int)
-    parser.add_argument("-o", "--output", help="Path to the output JSON",
+    parser.add_argument("-s", "--start", help="minimum stars", default=50, type=int)
+    parser.add_argument("-o", "--output", help="path to the output file",
                         required=True)
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
+    print("----planning----")
     stars = GitHubStars(args.token, start=args.start)
     if args.plan:
         plan = stars.read_plan(args.plan)
@@ -182,13 +253,23 @@ def main():
     else:
         plan = []
     plan += stars.make_plan()
-    print("----plan (≈%d fetches)----" % (len(plan) * 20))
+    print("----plan (≈%d requests)----" % (len(plan) * 20))
     print(plan)
     if args.save_plan:
         stars.write_plan(plan, args.save_plan)
     repos = stars.fetch(plan)
-    with open(args.output, "wb") as fout:
-        pickle.dump(repos, fout, protocol=-1)
+    print("----writing %d repositories----" % len(repos))
+    if args.output.endswith(".pickle"):
+        with open(args.output, "wb") as fout:
+            pickle.dump(repos, fout, protocol=-1)
+    elif args.output.endswith(".json"):
+        with open(args.output, "w") as fout:
+            json_repos = [repo_to_dict(r) for r in repos]
+            json.dump(json_repos, fout, indent=2, sort_keys=True)
+    else:
+        raise ValueError("Only JSON or pickle output formats are supported. "
+                         "So happy you know it after spending hours fetching "
+                         "the stuff!")
     print("The result was written to %s" % args.output)
 
 
