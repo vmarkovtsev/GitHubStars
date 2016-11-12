@@ -71,6 +71,9 @@ class GitHubStars(object):
             if m < self.THRESHOLD and length < self.QUERY_LIMIT:
                 offset += m
                 m *= 2
+            elif length > 2 * self.QUERY_LIMIT and offset == 0:
+                print("skipping %d - too many results (%d)" % (start, length))
+                start += 1
             else:
                 step = offset - m // 2
                 plan.append((start, start + step))
