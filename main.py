@@ -7,8 +7,11 @@ from github import Github as GitHub, RateLimitExceededException
 
 
 class GitHubStars(object):
-    QUERY_LIMIT = 1000
-    THRESHOLD = 1 << 20
+    """
+    Collects the list of repositories with highest number of stars.
+    """
+    QUERY_LIMIT = 1000  # GitHub API search results limit
+    THRESHOLD = 1 << 20  # when the stars probe exceeds this limit, we stop
 
     def __init__(self, login_or_token, password=None, **kwargs):
         self._start_index = kwargs.pop("start", 50)
@@ -17,6 +20,10 @@ class GitHubStars(object):
 
     @property
     def start_index(self):
+        """
+        :return: The minimum number of stars to appear in the list.
+        Query stars:x..x where x is start_index *must* yield <= 2000 repos.
+        """
         return self._start_index
 
     @start_index.setter
@@ -25,6 +32,22 @@ class GitHubStars(object):
         self._start_index = value
 
     def make_plan(self):
+        """
+        Builds the list of closed consecutive intervals in 1D stars space.
+        Since GitHub Search API limits the total number of repos in the
+        response by 1000, the lengths of these intervals gradually increases
+        and later exponentially explodes. E.g.
+        50..50
+        ...
+        90..91
+        ...
+        389..406
+        ...
+        5131..23292
+        Each interval [x, y] corresponds to the Search API query stars:x..y
+        The resulting fetch plan can be executed by fetch().
+        :return: list of tuples of length 2.
+        """
         start = self._start_index
         offset = 0
         m = 1
@@ -58,6 +81,11 @@ class GitHubStars(object):
         return plan
 
     def read_plan(self, file_name):
+        """
+        Reads the fetch plan (see make_plan()) from a file. The format is
+        plain text, each interval on a separate line.
+        :return: list of tuples of length 2.
+        """
         plan = []
         with open(file_name, "r") as fin:
             for line in fin:
@@ -69,11 +97,23 @@ class GitHubStars(object):
         return plan
 
     def write_plan(self, plan, file_name):
+        """
+        Stores the fetch plan on disk. The format is plain text, each interval
+        on a separate line.
+        """
         with open(file_name, "w") as fout:
             for p in plan:
                 fout.write("%d..%d\n" % p)
 
     def fetch(self, plan):
+        """
+        Fetches the repositories according to the plan.
+        :param plan: Enumerable of tuples of length 2. First element is
+        the starting number of stars, the second is the finishing (inclusive).
+        For example, 50..50 will fetch all repositories rated with 50 stars.
+        :return: The list of github.Repository.Repository objects. See
+        PyGitHub package for details.
+        """
         repos = []
         for i, p in enumerate(plan):
             print("f %d..%d\t%d / %d" % (p + (i + 1, len(plan))))
